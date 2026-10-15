@@ -1,8 +1,11 @@
 #pragma once
 
+#include "CorrectionTrack.h"
 #include "DelayLine.h"
 #include "InputConditioner.h"
 #include "PitchAnalyzer.h"
+#include "PitchCorrector.h"
+#include "PsolaShifter.h"
 #include "Smoother.h"
 #include "SpscFifo.h"
 
@@ -22,6 +25,9 @@ struct EngineParams
     float mix = 1.0f;           // 0 dry .. 1 wet
     float outputGainDb = 0.0f;
     bool bypass = false;
+
+    CorrectorSettings correction;        // key/scale/retune/humanize/vibrato/transpose...
+    PsolaShifter::Settings shifter;      // character / formant / throat
 };
 
 /** Data the UI needs, published once per analysis hop through a lock-free FIFO. */
@@ -29,7 +35,7 @@ struct AnalysisFrame
 {
     std::int64_t sample = 0;    // host-rate input sample index of the window centre
     float inputHz = 0.0f;       // detected pitch (0 = none)
-    float outputHz = 0.0f;      // corrected pitch (== input until Phase 3)
+    float outputHz = 0.0f;      // corrected pitch
     float targetMidi = -1.0f;   // target note, -1 = none
     float correctionCents = 0.0f;
     float confidence = 0.0f;
@@ -65,6 +71,7 @@ public:
 
     SpscFifo<AnalysisFrame, 1024>& getAnalysisFifo() noexcept { return analysisFifo_; }
     const PitchAnalyzer& getAnalyzer() const noexcept { return analyzer_; }
+    const PsolaShifter& getShifter() const noexcept { return shifter_; }
 
 private:
     void onNewEstimate() noexcept;
@@ -75,8 +82,17 @@ private:
     bool paramsInitialised_ = false;
 
     std::array<InputConditioner, maxChannels> conditioners_;
-    std::array<DelayLine, maxChannels> dryDelay_, wetDelay_;
+    std::array<DelayLine, maxChannels> dryDelay_;
     PitchAnalyzer analyzer_;
+    PitchCorrector corrector_;
+    CorrectionTrack track_;
+    CorrectionTrack::Cursor voicingCursor_;
+    PsolaShifter shifter_;
+
+    std::int64_t now_ = 0;
+    float energyIn_ = 0.0f, energyWet_ = 0.0f, levelGain_ = 1.0f, energyCoeff_ = 0.001f, levelCoeff_ = 0.0005f;
+    float detectedPeriod_ = 0.0f;
+    bool detectedVoiced_ = false;
 
     LinearSmoother mix_, gain_, bypassFade_, voicedFade_;
     SpscFifo<AnalysisFrame, 1024> analysisFifo_;

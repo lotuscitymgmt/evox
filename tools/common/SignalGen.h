@@ -71,7 +71,7 @@ inline TestSignal sawtooth (double fs, double seconds, const PitchCurve& pitch, 
 /** Crude but useful vowel model: glottal-like source (-12 dB/oct) through three
     resonators (/a/ formants), plus jitter, shimmer and breath noise. */
 inline TestSignal synthVoice (double fs, double seconds, const PitchCurve& pitch,
-                              float breathiness = 0.02f, unsigned seed = 1)
+                              float breathiness = 0.02f, unsigned seed = 1, double formantScale = 1.0)
 {
     std::mt19937 rng (seed);
     std::normal_distribution<double> gauss (0.0, 1.0);
@@ -102,7 +102,7 @@ inline TestSignal synthVoice (double fs, double seconds, const PitchCurve& pitch
         }
     };
 
-    Resonator f1 (fs, 730, 90), f2 (fs, 1090, 110), f3 (fs, 2440, 160);
+    Resonator f1 (fs, 730 * formantScale, 90), f2 (fs, 1090 * formantScale, 110), f3 (fs, 2440 * formantScale, 160);
     double peak = 1.0e-9;
     std::vector<double> tmp (src.samples.size());
 

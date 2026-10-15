@@ -5,7 +5,8 @@ add_executable(evox_tests
     TestMain.cpp
     test_conditioning.cpp
     test_pitch.cpp
-    test_engine.cpp)
+    test_engine.cpp
+    test_correction.cpp)
 
 target_link_libraries(evox_tests PRIVATE evox_dsp evox_test_support)
 find_package(Threads REQUIRED)

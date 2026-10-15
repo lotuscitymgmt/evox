@@ -23,6 +23,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("analysis")
     ap.add_argument("--truth")
+    ap.add_argument("--output-track", help="second evox_analyze CSV (e.g. of a rendered file), drawn in pink")
     ap.add_argument("-o", "--output", default=None)
     args = ap.parse_args()
 
@@ -44,12 +45,16 @@ def main():
         for s in a.spines.values():
             s.set_color("#333")
 
-    if args.truth:
+    if args.truth and not args.output_track:
         tr = load(args.truth)
         ax.plot([float(r["time_s"]) for r in tr], [to_midi(float(r["f0_hz"])) for r in tr],
                 color="#E5487F", lw=1, alpha=0.7, label="ground truth")
 
-    ax.plot(t, midi, ".", ms=2.5, color="#3FC1C9", label="detected f0")
+    ax.plot(t, midi, ".", ms=2.5, color="#3FC1C9", label="input f0" if args.output_track else "detected f0")
+    if args.output_track:
+        out_rows = load(args.output_track)
+        ax.plot([float(r["time_s"]) for r in out_rows], [to_midi(float(r["f0_hz"])) for r in out_rows],
+                ".", ms=2.5, color="#E5487F", label="output f0")
     names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
     valid = [m for m in midi if not math.isnan(m)]
     if valid:

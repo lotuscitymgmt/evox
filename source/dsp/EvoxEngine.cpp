@@ -16,16 +16,19 @@ void EvoxEngine::prepare (double sampleRate, int /*maxBlockSize*/, int /*numChan
         conditioners_[static_cast<size_t> (ch)].prepare (sampleRate);
         dryDelay_[static_cast<size_t> (ch)].prepare (latency_);
         dryDelay_[static_cast<size_t> (ch)].setDelay (latency_);
-        wetDelay_[static_cast<size_t> (ch)].prepare (latency_);
-        wetDelay_[static_cast<size_t> (ch)].setDelay (latency_);
     }
 
     analyzer_.prepare (sampleRate);
+    shifter_.prepare (sampleRate, latency_, pitchRangeFor (InputType::instrument).minHz);
 
     mix_.prepare (sampleRate, 0.02);
     gain_.prepare (sampleRate, 0.02);
     bypassFade_.prepare (sampleRate, 0.01);
     voicedFade_.prepare (sampleRate, 0.004); // short crossfade between shifted and dry consonants
+
+    // Level match: 30 ms energy followers, 80 ms gain smoothing.
+    energyCoeff_ = static_cast<float> (1.0 - std::exp (-1.0 / (0.030 * sampleRate)));
+    levelCoeff_ = static_cast<float> (1.0 - std::exp (-1.0 / (0.080 * sampleRate)));
 
     paramsInitialised_ = false;
     setParams (params_);
@@ -38,9 +41,17 @@ void EvoxEngine::reset() noexcept
     {
         conditioners_[static_cast<size_t> (ch)].reset();
         dryDelay_[static_cast<size_t> (ch)].reset();
-        wetDelay_[static_cast<size_t> (ch)].reset();
     }
     analyzer_.reset();
+    corrector_.reset();
+    track_.reset();
+    voicingCursor_ = {};
+    shifter_.reset();
+    now_ = 0;
+    detectedPeriod_ = 0.0f;
+    detectedVoiced_ = false;
+    energyIn_ = energyWet_ = 0.0f;
+    levelGain_ = 1.0f;
     voicedFade_.setImmediate (0.0f);
 }
 
@@ -53,6 +64,9 @@ void EvoxEngine::setParams (const EngineParams& p) noexcept
 
     for (auto& c : conditioners_)
         c.setLowCutEnabled (p.lowCut);
+
+    corrector_.setSettings (p.correction);
+    shifter_.setSettings (p.shifter);
 
     const float gainLin = std::pow (10.0f, p.outputGainDb / 20.0f);
     const float bypassTarget = p.bypass ? 1.0f : 0.0f;
@@ -77,12 +91,26 @@ void EvoxEngine::setParams (const EngineParams& p) noexcept
 void EvoxEngine::onNewEstimate() noexcept
 {
     const auto& e = analyzer_.getEstimate();
-    voicedFade_.setTarget (e.voiced ? 1.0f : 0.0f);
+    const float hopSeconds = static_cast<float> (analyzer_.getHopSizeHostSamples() / sampleRate_);
+    const auto c = corrector_.update (e.f0Hz, e.voiced, hopSeconds);
 
+    detectedVoiced_ = c.voiced;
+    detectedPeriod_ = c.voiced ? static_cast<float> (sampleRate_ / e.f0Hz) : 0.0f;
+
+    CorrectionTrack::Entry entry;
+    entry.sample = e.centreSample;
+    entry.voiced = c.voiced;
+    entry.periodSamples = detectedPeriod_;
+    entry.ratio = std::exp2 (c.shiftSemitones() / 12.0f);
+    track_.push (entry);
+
+    const float ref = params_.correction.referenceHz;
     AnalysisFrame frame;
     frame.sample = e.centreSample;
-    frame.inputHz = e.voiced ? e.f0Hz : 0.0f;
-    frame.outputHz = frame.inputHz;
+    frame.inputHz = c.voiced ? e.f0Hz : 0.0f;
+    frame.outputHz = c.voiced ? midiToHz (c.outputMidi, ref) : 0.0f;
+    frame.targetMidi = c.targetMidi;
+    frame.correctionCents = 100.0f * c.shiftSemitones();
     frame.confidence = e.confidence;
     frame.inputDb = e.rmsDb;
     frame.voiced = e.voiced;
@@ -108,12 +136,45 @@ void EvoxEngine::process (float* const* channels, int numChannels, int numSample
             mono += conditioned[ch];
         }
 
-        if (analyzer_.push (mono * monoScale))
+        mono *= monoScale;
+        if (analyzer_.push (mono))
             onNewEstimate();
 
-        // Voiced/unvoiced weight. Until the shifter lands (Phase 3) both paths carry the
-        // same conditioned signal, so this is sonically neutral but already exercised.
+        shifter_.pushInput (conditioned, numChannels, mono, now_, detectedPeriod_, detectedVoiced_);
+
+        // Output point: the input sample `latency` samples ago.
+        const std::int64_t p = now_ - latency_;
+        ++now_;
+
+        float shifted[maxChannels] {};
+        if (p >= 0)
+        {
+            shifter_.render (p, track_, shifted, numChannels);
+            voicedFade_.setTarget (track_.at (voicingCursor_, p).voiced ? 1.0f : 0.0f);
+        }
+
+        // Unvoiced audio (s, t, breaths) skips the shifter: crossfade to the unshifted input.
         const float voiced = voicedFade_.next();
+
+        // Level match. Pitch-synchronous grains centred on glottal peaks (more so with hard
+        // Character, or when lowering pitch) carry more energy than the source; follow the
+        // ratio slowly (80 ms) on voiced audio only, within +/-12 dB, so it can't pump.
+        if (p >= 0 && voiced > 0.5f)
+        {
+            float inSq = 0.0f, wetSq = 0.0f;
+            for (int ch = 0; ch < numChannels; ++ch)
+            {
+                const float u = shifter_.readInput (ch, p);
+                inSq += u * u;
+                wetSq += shifted[ch] * shifted[ch];
+            }
+            energyIn_ += (inSq - energyIn_) * energyCoeff_;
+            energyWet_ += (wetSq - energyWet_) * energyCoeff_;
+            const float target = energyWet_ > 1.0e-9f ? std::clamp (std::sqrt (energyIn_ / energyWet_), 0.25f, 4.0f) : 1.0f;
+            levelGain_ += (target - levelGain_) * levelCoeff_;
+        }
+        for (int ch = 0; ch < numChannels; ++ch)
+            shifted[ch] *= levelGain_;
         const float mix = mix_.next();
         const float gain = gain_.next();
         const float bypass = bypassFade_.next();
@@ -122,9 +183,8 @@ void EvoxEngine::process (float* const* channels, int numChannels, int numSample
         {
             const auto c = static_cast<size_t> (ch);
             const float dry = dryDelay_[c].process (channels[ch][i]);
-            const float unshifted = wetDelay_[c].process (conditioned[ch]);
-            const float shifted = unshifted;
-            const float wet = voiced * shifted + (1.0f - voiced) * unshifted;
+            const float unshifted = p >= 0 ? shifter_.readInput (ch, p) : 0.0f;
+            const float wet = voiced * shifted[ch] + (1.0f - voiced) * unshifted;
             const float processed = (mix * wet + (1.0f - mix) * dry) * gain;
             channels[ch][i] = bypass * dry + (1.0f - bypass) * processed;
         }

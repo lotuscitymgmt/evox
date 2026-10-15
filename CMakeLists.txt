@@ -30,6 +30,9 @@ add_library(evox_dsp STATIC
     source/dsp/EvoxEngine.cpp
     source/dsp/Fft.cpp
     source/dsp/PitchAnalyzer.cpp
+    source/dsp/PitchCorrector.cpp
+    source/dsp/PitchMarker.cpp
+    source/dsp/PsolaShifter.cpp
     source/dsp/YinPitchDetector.cpp)
 target_include_directories(evox_dsp PUBLIC source)
 target_compile_features(evox_dsp PUBLIC cxx_std_20)

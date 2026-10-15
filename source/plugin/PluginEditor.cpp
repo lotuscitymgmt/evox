@@ -66,25 +66,34 @@ void EvoxEditor::paint (juce::Graphics& g)
                     + juce::String (processor_.getLatencySamples()) + " smp (" + juce::String (latencyMs, 1) + " ms)",
                 header.removeFromRight (280), juce::Justification::centredRight);
 
-    juce::String readout = "--";
-    if (haveFrame_ && latest_.voiced && latest_.inputHz > 0.0f)
-    {
-        const auto ref = processor_.getState().getRawParameterValue (ParamID::referencePitch)->load();
-        const auto midi = dsp::hzToMidi (latest_.inputHz, ref);
+    const auto ref = processor_.getState().getRawParameterValue (ParamID::referencePitch)->load();
+    auto noteText = [ref] (float hz) {
+        const auto midi = dsp::hzToMidi (hz, ref);
         const auto nearest = static_cast<int> (std::lround (midi));
         const auto cents = 100.0f * (midi - static_cast<float> (nearest));
-        readout = noteNames()[((nearest % 12) + 12) % 12] + juce::String (nearest / 12 - 1) + "  "
-                + (cents >= 0 ? "+" : "") + juce::String (cents, 0) + " ct   "
-                + juce::String (latest_.inputHz, 1) + " Hz   conf " + juce::String (latest_.confidence, 2);
+        return noteNames()[((nearest % 12) + 12) % 12] + juce::String (nearest / 12 - 1) + " "
+             + (cents >= 0 ? "+" : "") + juce::String (cents, 0) + "ct";
+    };
+
+    juce::String readout = "--", corrected;
+    if (haveFrame_ && latest_.voiced && latest_.inputHz > 0.0f)
+    {
+        readout = "in " + noteText (latest_.inputHz) + "  " + juce::String (latest_.inputHz, 1) + " Hz";
+        corrected = "out " + noteText (latest_.outputHz) + "   corr " + (latest_.correctionCents >= 0 ? "+" : "")
+                  + juce::String (latest_.correctionCents, 0) + " ct";
     }
     else if (haveFrame_)
     {
         readout = "unvoiced";
     }
 
+    g.setColour (accent);
+    g.setFont (juce::FontOptions (17.0f));
+    g.drawText (corrected, header.withTrimmedLeft (300), juce::Justification::centredLeft);
+
     g.setColour (cyan);
-    g.setFont (juce::FontOptions (20.0f));
-    g.drawText (readout, header, juce::Justification::centredLeft);
+    g.setFont (juce::FontOptions (17.0f));
+    g.drawText (readout, header.withWidth (300), juce::Justification::centredLeft);
 }
 
 void EvoxEditor::resized()

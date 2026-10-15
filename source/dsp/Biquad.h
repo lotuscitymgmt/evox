@@ -20,6 +20,21 @@ struct BiquadCoeffs
                  -2.0 * cw / a0, (1.0 - alpha) / a0 };
     }
 
+    /** RBJ high shelf, shelf slope S = 1. */
+    static BiquadCoeffs highShelf (double fs, double fc, double gainDb) noexcept
+    {
+        const auto a = std::pow (10.0, gainDb / 40.0);
+        const auto w0 = 2.0 * std::numbers::pi * fc / fs;
+        const auto cw = std::cos (w0), alpha = std::sin (w0) / 2.0 * std::sqrt (2.0);
+        const auto sa = 2.0 * std::sqrt (a) * alpha;
+        const auto a0 = (a + 1.0) - (a - 1.0) * cw + sa;
+        return { a * ((a + 1.0) + (a - 1.0) * cw + sa) / a0,
+                 -2.0 * a * ((a - 1.0) + (a + 1.0) * cw) / a0,
+                 a * ((a + 1.0) + (a - 1.0) * cw - sa) / a0,
+                 2.0 * ((a - 1.0) - (a + 1.0) * cw) / a0,
+                 ((a + 1.0) - (a - 1.0) * cw - sa) / a0 };
+    }
+
     static BiquadCoeffs lowpass (double fs, double fc, double q) noexcept
     {
         const auto w0 = 2.0 * std::numbers::pi * fc / fs;

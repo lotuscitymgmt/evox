@@ -6,3 +6,6 @@ target_link_libraries(evox_gensignals PRIVATE evox_test_support)
 
 add_executable(evox_bench evox_bench.cpp)
 target_link_libraries(evox_bench PRIVATE evox_dsp evox_test_support)
+
+add_executable(evox_render evox_render.cpp)
+target_link_libraries(evox_render PRIVATE evox_dsp evox_test_support)

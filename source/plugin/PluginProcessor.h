@@ -60,12 +60,32 @@ private:
     dsp::EvoxEngine engine_;
 
     // Cached raw parameter pointers: lock-free reads on the audio thread.
-    std::atomic<float>* bypass_ = nullptr;
-    std::atomic<float>* inputType_ = nullptr;
-    std::atomic<float>* tracking_ = nullptr;
-    std::atomic<float>* lowCut_ = nullptr;
-    std::atomic<float>* mix_ = nullptr;
-    std::atomic<float>* outputGain_ = nullptr;
+    struct Raw
+    {
+        std::atomic<float>* bypass = nullptr;
+        std::atomic<float>* inputType = nullptr;
+        std::atomic<float>* tracking = nullptr;
+        std::atomic<float>* lowCut = nullptr;
+        std::atomic<float>* key = nullptr;
+        std::atomic<float>* scale = nullptr;
+        std::array<std::atomic<float>*, 12> notes {};
+        std::atomic<float>* retuneSpeed = nullptr;
+        std::atomic<float>* humanize = nullptr;
+        std::atomic<float>* naturalVibrato = nullptr;
+        std::atomic<float>* transpose = nullptr;
+        std::atomic<float>* detune = nullptr;
+        std::atomic<float>* referencePitch = nullptr;
+        std::atomic<float>* vibratoOn = nullptr;
+        std::atomic<float>* vibratoShape = nullptr;
+        std::atomic<float>* vibratoRate = nullptr;
+        std::atomic<float>* vibratoDepth = nullptr;
+        std::atomic<float>* vibratoDelay = nullptr;
+        std::atomic<float>* character = nullptr;
+        std::atomic<float>* formantOn = nullptr;
+        std::atomic<float>* throat = nullptr;
+        std::atomic<float>* mix = nullptr;
+        std::atomic<float>* outputGain = nullptr;
+    } raw_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EvoxAudioProcessor)
 };

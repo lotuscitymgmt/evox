@@ -94,13 +94,14 @@ TEST_CASE ("engine: impulse emerges exactly at the reported latency (all paths)"
     }
 }
 
-TEST_CASE ("engine: output gain and dry/wet mix")
+TEST_CASE ("engine: output gain applies to the latency-aligned dry path at mix 0")
 {
     const double fs = 48000.0;
     dsp::EvoxEngine e;
     e.prepare (fs, 256, 1);
     dsp::EngineParams p;
     p.lowCut = false;
+    p.mix = 0.0f;
     p.outputGainDb = -6.0206f;
     e.setParams (p);
 
@@ -112,7 +113,7 @@ TEST_CASE ("engine: output gain and dry/wet mix")
     double err = 0.0;
     for (size_t i = 10000; i < audio[0].size(); ++i)
         err = std::max (err, std::abs (double (audio[0][i]) - 0.5 * sig.samples[i - static_cast<size_t> (lat)]));
-    CHECK (err < 2.0e-3); // DC blocker's tiny phase shift at 1 kHz is the only difference
+    CHECK (err < 1.0e-5);
 }
 
 TEST_CASE ("engine: process() performs zero heap allocations")
