@@ -10,6 +10,7 @@
 #include "SpscFifo.h"
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 
 namespace evox::dsp
@@ -43,6 +44,20 @@ struct AnalysisFrame
     bool voiced = false;
 };
 
+/** Block peak / RMS for the UI meters. Written by the audio thread, read by the UI.
+    Peaks accumulate (max) until the UI takes them with exchange(), so short transients
+    between two repaints are never missed. */
+struct LevelMeters
+{
+    std::atomic<float> inPeak { 0.0f }, inRms { 0.0f }, outPeak { 0.0f }, outRms { 0.0f };
+
+    static void raise (std::atomic<float>& a, float v) noexcept
+    {
+        float current = a.load (std::memory_order_relaxed);
+        while (v > current && ! a.compare_exchange_weak (current, v, std::memory_order_relaxed)) {}
+    }
+};
+
 /** Top-level real-time engine. Owns every DSP stage and the latency budget.
     prepare() allocates; process() never allocates, locks or does I/O. */
 class EvoxEngine
@@ -70,6 +85,7 @@ public:
     double getSampleRate() const noexcept { return sampleRate_; }
 
     SpscFifo<AnalysisFrame, 1024>& getAnalysisFifo() noexcept { return analysisFifo_; }
+    LevelMeters& getMeters() noexcept { return meters_; }
     const PitchAnalyzer& getAnalyzer() const noexcept { return analyzer_; }
     const PsolaShifter& getShifter() const noexcept { return shifter_; }
 
@@ -96,6 +112,9 @@ private:
 
     LinearSmoother mix_, gain_, bypassFade_, voicedFade_;
     SpscFifo<AnalysisFrame, 1024> analysisFifo_;
+    LevelMeters meters_;
+
+    void measure (float* const* channels, int numChannels, int numSamples, bool input) noexcept;
 };
 
 } // namespace evox::dsp

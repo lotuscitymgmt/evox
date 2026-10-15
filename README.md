@@ -5,10 +5,13 @@ note jumps at fast retune speeds, a bright, slightly glassy TD-PSOLA texture, an
 low-latency tracking. Clean-room design built on published DSP techniques (YIN,
 TD-PSOLA, LPC/grain-resampling formant handling).
 
-**Status:** Phases 1–4 are complete: skeleton/parameters/latency, pitch detection,
-correction logic + TD-PSOLA shifter, formant/throat control. Every parameter except
-oversampling is live. The UI is still the temporary developer editor (full UI = Phase 5).
-Oversampling, presets, profiling on target hardware and the final README are Phase 6.
+**Status:** Phases 1–5 are complete: skeleton/parameters/latency, pitch detection,
+correction logic + TD-PSOLA shifter, formant/throat control, and the full UI (with the
+five factory presets, user presets and A/B compare). Every parameter except oversampling
+is live. Phase 6 covers oversampling, CPU profiling on target hardware, final pluginval
+runs on macOS/Windows and the final README.
+
+![EVOX](docs/phase5/evox_980x560.png)
 
 ---
 
@@ -138,6 +141,56 @@ fill that struct — no JUCE types cross the boundary.
   `voice_melisma_A3` plot from the harness).
 
 ---
+
+## User interface (Phase 5)
+
+Dark studio look: background `#0E0F12`, panels `#17191E`, one accent (lotus pink `#E5487F`
+for the corrected output and active controls), and cyan `#3FC1C9` reserved for the
+*detected* pitch. Everything is vector-drawn (paths, no bitmaps), so it is crisp at any
+HiDPI scale. The window is resizable from 760×440 to 2400×1400 (default 980×560), and the
+last size is saved with the session.
+
+| Area | Contents |
+|---|---|
+| Top bar | Bypass, lotus mark + wordmark, preset browser (‹ › dropdown, Save), Input Type, sample rate + latency, A/B compare (A, B, copy A→B) |
+| Left | Key, Scale, vertical one-octave keyboard, A4 reference |
+| Centre | Correction meter (±100 ct, 60 fps); scrolling piano-roll pitch display (4 s, cyan input / pink output, target-note band, non-target rows shaded; wheel = zoom, double-click = reset) |
+| Control row | Hero **Retune Speed** knob with ms readout and FAST/NATURAL arc labels; Humanize, Tracking, Character, Throat, Natural Vibrato, Mix |
+| Right | Input/output meters (RMS body, peak, 1.5 s peak hold, numeric), Output gain, Formant, Low Cut, Transpose, Detune, collapsible Create Vibrato panel (on/off, shape, rate, depth, delay) |
+
+**Keyboard:**
+- Pink = correction target.
+- Struck through = removed.
+- Cyan outline + "BYP" = bypassed (left uncorrected).
+- A dot marks a note you overrode.
+- Click cycles enabled → removed → bypass. Right-click (or Alt-click) returns the note to "follow Key/Scale".
+- The note currently targeted is outlined.
+
+**Knobs:**
+- Drag vertically (250 px = full range). Hold **Shift** for 10× finer control.
+- Double-click resets to default. The mouse wheel works.
+- A value bubble appears on hover and while dragging.
+- Click the value under a knob to type a number.
+- Host gestures (automation write/touch) come from JUCE's slider handling; only the drag maths is custom.
+
+**Threading:** one 60 Hz editor timer drains the analysis SPSC FIFO into the display's own
+history and reads the level meters. Peaks accumulate in atomics (compare-and-swap max), and
+the UI collects them with `exchange(0)`, so no transient between two frames is lost. The audio
+thread never waits on the UI, and the UI never locks.
+
+**Font:** Inter 4.1, embedded via JUCE BinaryData, with the OpenType `tnum` feature on, so
+values never jitter. Inter is under the SIL Open Font License 1.1
+(`resources/fonts/Inter-LICENSE.txt`): free to embed and ship in commercial software. Keep the
+licence file with the source.
+
+**Presets:** the five factory presets are defined in code as "defaults + overrides"
+(`PresetManager.cpp`), so adding parameters later never breaks them. They are also exposed
+as host programs. User presets are saved as `.evoxpreset` XML in
+`<user app data>/Lotus Sounds/EVOX/Presets/`.
+
+**UI snapshots without a DAW:** `cmake -B build -DEVOX_BUILD_SNAPSHOT=ON && cmake --build build --target evox_snapshot`,
+then `evox_snapshot out.png [w h scale] [--retune ms] [--expand-vibrato]`. It renders the real
+editor while the real processor runs a synthetic sung glide. Images are in `docs/phase5/`.
 
 ## Correction and shifting (Phases 3–4)
 
@@ -273,3 +326,4 @@ Parameter IDs are versioned (`ParameterID{id, 1}`) and must never be renamed.
 * **AAX** (later): needs the Avid AAX SDK plus a PACE/iLok signing agreement.
 * No third-party DSP libraries are used. The FFT, filters, YIN and test framework are written
   in-house.
+* **Inter** font (UI): SIL Open Font License 1.1, embedded. Commercial use permitted.

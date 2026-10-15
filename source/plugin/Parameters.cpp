@@ -19,7 +19,9 @@ auto floatAttrs (const juce::String& suffix, int decimals)
     return juce::AudioParameterFloatAttributes()
         .withLabel (suffix)
         .withStringFromValueFunction ([decimals, suffix] (float v, int) {
-            return juce::String (v, decimals) + (suffix.isEmpty() ? "" : " " + suffix);
+            // Note: juce::String (float, 0) means "full precision", so round explicitly.
+            const auto number = decimals == 0 ? juce::String (juce::roundToInt (v)) : juce::String (v, decimals);
+            return number + (suffix.isEmpty() ? "" : " " + suffix);
         });
 }
 } // namespace

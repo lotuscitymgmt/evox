@@ -117,11 +117,31 @@ void EvoxEngine::onNewEstimate() noexcept
     analysisFifo_.push (frame); // dropping a frame when the UI is behind is harmless
 }
 
+void EvoxEngine::measure (float* const* channels, int numChannels, int numSamples, bool input) noexcept
+{
+    if (numSamples <= 0)
+        return;
+    float peak = 0.0f;
+    double sum = 0.0;
+    for (int ch = 0; ch < numChannels; ++ch)
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float v = channels[ch][i];
+            peak = std::max (peak, std::abs (v));
+            sum += double (v) * v;
+        }
+    const auto rms = static_cast<float> (std::sqrt (sum / (numSamples * numChannels)));
+    LevelMeters::raise (input ? meters_.inPeak : meters_.outPeak, peak);
+    (input ? meters_.inRms : meters_.outRms).store (rms, std::memory_order_relaxed);
+}
+
 void EvoxEngine::process (float* const* channels, int numChannels, int numSamples) noexcept
 {
     numChannels = std::min (numChannels, maxChannels);
     if (numChannels <= 0)
         return;
+
+    measure (channels, numChannels, numSamples, true);
 
     const float monoScale = 1.0f / static_cast<float> (numChannels);
 
@@ -189,6 +209,8 @@ void EvoxEngine::process (float* const* channels, int numChannels, int numSample
             channels[ch][i] = bypass * dry + (1.0f - bypass) * processed;
         }
     }
+
+    measure (channels, numChannels, numSamples, false);
 }
 
 void EvoxEngine::processBypassed (float* const* channels, int numChannels, int numSamples) noexcept

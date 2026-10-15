@@ -71,10 +71,23 @@ if(EVOX_BUILD_PLUGIN)
         AU_MAIN_TYPE kAudioUnitType_Effect
         COPY_PLUGIN_AFTER_BUILD FALSE)
 
+    juce_add_binary_data(EvoxAssets SOURCES
+        resources/fonts/Inter-Regular.ttf
+        resources/fonts/Inter-Medium.ttf
+        resources/fonts/Inter-SemiBold.ttf
+        resources/fonts/Inter-Bold.ttf)
+
     target_sources(EVOX PRIVATE
         source/plugin/Parameters.cpp
+        source/plugin/PresetManager.cpp
         source/plugin/PluginProcessor.cpp
-        source/plugin/PluginEditor.cpp)
+        source/plugin/PluginEditor.cpp
+        source/plugin/ui/Theme.cpp
+        source/plugin/ui/EvoxLookAndFeel.cpp
+        source/plugin/ui/Knob.cpp
+        source/plugin/ui/PitchDisplay.cpp
+        source/plugin/ui/NoteKeyboard.cpp
+        source/plugin/ui/Panels.cpp)
 
     target_include_directories(EVOX PRIVATE source source/plugin)
 
@@ -87,12 +100,36 @@ if(EVOX_BUILD_PLUGIN)
     target_link_libraries(EVOX
         PRIVATE
             evox_dsp
+            EvoxAssets
             juce::juce_audio_utils
             juce::juce_dsp
         PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_lto_flags
             juce::juce_recommended_warning_flags)
+
+
+    # Offline editor snapshot (renders the real UI with live engine data to PNG).
+    option(EVOX_BUILD_SNAPSHOT "Build the evox_snapshot UI rendering tool" OFF)
+    if(EVOX_BUILD_SNAPSHOT)
+        juce_add_console_app(evox_snapshot PRODUCT_NAME "evox_snapshot")
+        target_sources(evox_snapshot PRIVATE
+            tools/evox_snapshot.cpp
+            source/plugin/Parameters.cpp
+            source/plugin/PresetManager.cpp
+            source/plugin/PluginProcessor.cpp
+            source/plugin/PluginEditor.cpp
+            source/plugin/ui/Theme.cpp
+            source/plugin/ui/EvoxLookAndFeel.cpp
+            source/plugin/ui/Knob.cpp
+            source/plugin/ui/PitchDisplay.cpp
+            source/plugin/ui/NoteKeyboard.cpp
+            source/plugin/ui/Panels.cpp)
+        target_include_directories(evox_snapshot PRIVATE source source/plugin tools)
+        target_compile_definitions(evox_snapshot PRIVATE JucePlugin_Name="EVOX" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+        target_link_libraries(evox_snapshot PRIVATE evox_dsp EvoxAssets juce::juce_audio_utils juce::juce_dsp
+                                                    juce::juce_recommended_config_flags)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------

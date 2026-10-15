@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Parameters.h"
+#include "PresetManager.h"
 #include "dsp/EvoxEngine.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -37,10 +38,11 @@ public:
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
 
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram (int) override {}
-    const juce::String getProgramName (int) override { return "Default"; }
+    // Factory presets are exposed as host programs too.
+    int getNumPrograms() override { return presets_.getNumFactoryPresets(); }
+    int getCurrentProgram() override { return juce::jmax (0, juce::jmin (presets_.getCurrentIndex(), getNumPrograms() - 1)); }
+    void setCurrentProgram (int index) override { presets_.loadPreset (index); }
+    const juce::String getProgramName (int index) override { return presets_.getPresetNames()[index]; }
     void changeProgramName (int, const juce::String&) override {}
 
     void getStateInformation (juce::MemoryBlock& destData) override;
@@ -50,6 +52,14 @@ public:
     juce::AudioProcessorValueTreeState& getState() noexcept { return apvts_; }
     dsp::EvoxEngine& getEngine() noexcept { return engine_; }
 
+    PresetManager& getPresetManager() noexcept { return presets_; }
+
+    /** A/B compare (message thread). Switching stores the current state in the active slot
+        and recalls the other; the first visit to a slot starts from a copy of the other. */
+    int getActiveSlot() const noexcept { return activeSlot_; }
+    void selectSlot (int slot);
+    void copyActiveSlotToOther();
+
     /** Consumer side of the analysis FIFO (UI thread only). */
     bool popAnalysisFrame (dsp::AnalysisFrame& frame) noexcept { return engine_.getAnalysisFifo().pop (frame); }
 
@@ -57,7 +67,10 @@ private:
     dsp::EngineParams readParams() const noexcept;
 
     juce::AudioProcessorValueTreeState apvts_;
+    PresetManager presets_ { apvts_ };
     dsp::EvoxEngine engine_;
+    std::array<juce::ValueTree, 2> abSlots_;
+    int activeSlot_ = 0;
 
     // Cached raw parameter pointers: lock-free reads on the audio thread.
     struct Raw

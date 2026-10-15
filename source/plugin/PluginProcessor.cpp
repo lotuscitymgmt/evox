@@ -125,6 +125,24 @@ void EvoxAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer,
     engine_.processBypassed (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), buffer.getNumSamples());
 }
 
+void EvoxAudioProcessor::selectSlot (int slot)
+{
+    slot = juce::jlimit (0, 1, slot);
+    if (slot == activeSlot_)
+        return;
+
+    abSlots_[static_cast<size_t> (activeSlot_)] = apvts_.copyState();
+    auto& target = abSlots_[static_cast<size_t> (slot)];
+    if (target.isValid())
+        apvts_.replaceState (target.createCopy());
+    activeSlot_ = slot;
+}
+
+void EvoxAudioProcessor::copyActiveSlotToOther()
+{
+    abSlots_[static_cast<size_t> (1 - activeSlot_)] = apvts_.copyState();
+}
+
 juce::AudioProcessorParameter* EvoxAudioProcessor::getBypassParameter() const
 {
     return apvts_.getParameter (ParamID::bypass);
