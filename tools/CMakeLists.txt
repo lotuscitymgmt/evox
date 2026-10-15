@@ -1,0 +1,8 @@
+add_executable(evox_analyze evox_analyze.cpp)
+target_link_libraries(evox_analyze PRIVATE evox_dsp evox_test_support)
+
+add_executable(evox_gensignals evox_gensignals.cpp)
+target_link_libraries(evox_gensignals PRIVATE evox_test_support)
+
+add_executable(evox_bench evox_bench.cpp)
+target_link_libraries(evox_bench PRIVATE evox_dsp evox_test_support)
