@@ -143,21 +143,26 @@ float PsolaShifter::grainStretch (float ratio) const noexcept
     return std::clamp (alpha, 0.25f, 4.0f);
 }
 
-float PsolaShifter::sourceHalfLength (float period, float alpha) const noexcept
+float PsolaShifter::outputHalfLength (float period, float alpha, float ratio) const noexcept
 {
-    // The grain's *output* length is set by Character alone (halfFactor x period); alpha only
-    // decides how much source it covers. If stretched grains kept their source span they
-    // would overlap neighbours with mismatched internal periodicity and comb-filter the
-    // envelope; if compressed grains kept theirs they would get shorter than a period and
-    // smear the envelope they are meant to move.
-    return halfFactor_ * period / alpha;
+    // Output grain half-length, in units of halfFactor x input period:
+    //  - up to the output spacing (1 / ratio when lowering), so lowered pitches don't open
+    //    gaps between grains...
+    //  - ...but never reading more than ~one source period per side unless the grain is
+    //    being compressed (alpha < 1), or it would carry two glottal pulses into one grain.
+    // Cases: formant on / lowering -> 1 (classic PSOLA); formant off / -12 st -> 2 (full
+    // period stretched x2); throat > 100 % -> 1 (stretched grains read less source, no comb
+    // filtering); throat < 100 % -> 1 (compressed grains read more source, no smearing).
+    const float spacingLimit = std::max (1.0f, 1.0f / ratio);
+    const float sourceLimit = std::max (1.0f, alpha);
+    return halfFactor_ * period * std::min (spacingLimit, sourceLimit);
 }
 
 void PsolaShifter::placeGrain (double ts, float period, float ratio, std::int64_t p, int numChannels) noexcept
 {
     const float alpha = grainStretch (ratio);
-    const float halfSource = sourceHalfLength (period, alpha); // grain half-length in the input
-    const float halfOut = alpha * halfSource;                  // ...and once re-placed in the output
+    const float halfOut = outputHalfLength (period, alpha, ratio); // grain half-length in the output
+    const float halfSource = halfOut / alpha;                       // ...and in the input it reads
 
     // Choose the analysis mark nearest to t_s among those whose grain is fully available.
     const auto available = static_cast<double> (now_) - 2.0; // Hermite needs i + 2
@@ -232,7 +237,7 @@ void PsolaShifter::render (std::int64_t p, const CorrectionTrack& track, float* 
         const float ratio = voiced ? std::clamp (decision.ratio, 0.25f, 4.0f) : 1.0f;
 
         const float alpha = grainStretch (ratio);
-        const double lead = alpha * sourceHalfLength (period, alpha);
+        const double lead = outputHalfLength (period, alpha, ratio);
 
         if (nextSynthesis_ - lead > static_cast<double> (p))
             break;

@@ -72,29 +72,38 @@ inline double rms (const std::vector<float>& v, size_t from, size_t to)
     return std::sqrt (acc / static_cast<double> (to - from));
 }
 
-/** Formant-envelope centroid of a harmonic signal with known f0: DFT magnitudes are
-    sampled exactly at each harmonic, the -12 dB/oct glottal tilt of the test source is
-    undone (x k^2), and the power-weighted centroid of that envelope is returned. Unlike a
-    plain spectral centroid this ignores where the harmonics sit, so it moves only when the
+/** Formant-envelope centroid of a harmonic signal with known f0. Each harmonic's level is
+    the strongest spectral peak within +/-3 % of k * f0, capped at +/-30 % of f0 (so pitch jitter, as in a real voice,
+    can't make it miss the peak); the -12 dB/oct glottal tilt of the test source is undone
+    (x k^2) and the power-weighted centroid of that envelope is returned. Unlike a plain
+    spectral centroid this ignores where the harmonics sit, so it moves only when the
     envelope (formants) moves. */
 inline double harmonicEnvelopeCentroid (const std::vector<float>& v, size_t from, size_t n, double fs, double f0,
                                         double loHz = 200.0, double hiHz = 3500.0)
 {
+    dsp::Fft fft;
+    fft.prepare (15);
+    const int size = 1 << 15; // zero-padded: ~1.5 Hz bins at 48 kHz
+    std::vector<float> re (static_cast<size_t> (size), 0.0f), im (static_cast<size_t> (size), 0.0f);
+    for (size_t i = 0; i < n && i < static_cast<size_t> (size); ++i)
+        re[i] = v[from + i] * static_cast<float> (0.5 - 0.5 * std::cos (2.0 * std::numbers::pi * static_cast<double> (i) / static_cast<double> (n)));
+    fft.perform (re.data(), im.data(), false);
+
+    const double binHz = fs / size;
     double num = 0.0, den = 0.0;
     for (int k = 1; k * f0 <= hiHz; ++k)
     {
         const double f = k * f0;
         if (f < loHz)
             continue;
-        double re = 0.0, im = 0.0;
-        for (size_t i = 0; i < n; ++i)
-        {
-            const double w = 0.5 - 0.5 * std::cos (2.0 * std::numbers::pi * static_cast<double> (i) / static_cast<double> (n));
-            const double ph = 2.0 * std::numbers::pi * f * static_cast<double> (i) / fs;
-            re += w * v[from + i] * std::cos (ph);
-            im -= w * v[from + i] * std::sin (ph);
-        }
-        const double a = std::sqrt (re * re + im * im) * (f / f0) * (f / f0) * f0 * f0; // undo 1/k^2 in absolute frequency
+        // Search +/-3 % for jitter, but never wider than +/-30 % of the harmonic spacing.
+        const double halfWidth = std::max (1.5 * binHz, std::min (0.03 * f, 0.3 * f0));
+        const int lo = static_cast<int> (std::floor ((f - halfWidth) / binHz));
+        const int hi = static_cast<int> (std::ceil ((f + halfWidth) / binHz));
+        double peak = 0.0;
+        for (int b = lo; b <= hi && b < size / 2; ++b)
+            peak = std::max (peak, double (re[static_cast<size_t> (b)]) * re[static_cast<size_t> (b)] + double (im[static_cast<size_t> (b)]) * im[static_cast<size_t> (b)]);
+        const double a = std::sqrt (peak) * (f / f0) * (f / f0) * f0 * f0; // undo 1/k^2 in absolute frequency
         // Power per Hz: harmonics are f0 apart, so weight by 1/f0 to compare different pitches.
         num += f * a * a / f0;
         den += a * a / f0;

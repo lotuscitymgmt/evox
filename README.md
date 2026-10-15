@@ -287,18 +287,31 @@ switched to **grain resampling**, because in TD-PSOLA it is the native mechanism
   scaling (root finding) or re-fitting from a warped spectrum. Both are expensive, and the
   first is numerically fragile. Grain resampling costs one interpolated read per sample and
   adds zero latency.
-* Detail that matters: the output grain length is set by Character alone, and α only changes
-  how much source a grain reads (2H/α). Without this, Throat above ~120% comb-filtered itself
-  (stretched grains overlapped with mismatched periodicity), and Throat below 100% smeared the
-  envelope.
+* Detail that matters: α changes how much source a grain reads (2H/α), not how long the grain
+  is in the output (see the grain length rule below). Without this, Throat above ~120%
+  comb-filtered itself, with stretched grains overlapping at mismatched periodicity.
 
-Measured on a synthetic /a/, using the formant-envelope centroid from `harmonicEnvelopeCentroid`
-in the tests:
+Measured on a synthetic /a/ (breath-free, Character 0). Each output's formant-envelope centroid
+(`harmonicEnvelopeCentroid` in the tests) is compared with *ideal* references rendered at the
+same output pitch, one with the formants where they should be and one where they shouldn't:
 
-* Formant correction holds the envelope within 5% at ±12 st.
-* With formant correction off, the envelope follows pitch (×1.3 at +12 st, ×0.69 at −12 st).
-* Throat 150% gives ×0.73 (ideal 0.71). Throat 70% gives ×1.15 (ideal 1.28). Brightening
-  reaches roughly 60% of the ideal in log terms, darkening almost all of it.
+| Case | EVOX | Ideal | Wrong-answer ideal |
+|---|---|---|---|
+| +12 st, formant on | 1105 | 1183 | 1482 |
+| −12 st, formant on | 1117 | 1098 | 557 |
+| +12 st, formant off ("chipmunk") | 1487 | 1482 | 1183 |
+| −12 st, formant off ("monster") | 573 | 557 | 1098 |
+| Throat 150% | 728 | 752 | 1045 |
+| Throat 70% | 1307 | 1211 | 1045 |
+
+Every case lands within 12% of its ideal and well on the right side. Comparing against
+references *at the output pitch* matters: the measure itself shifts with f0, so comparing
+against the input would be biased.
+
+**Grain length rule.** The output grain half-length is `Character factor × input period ×
+min(max(1, 1/ratio), max(1, α))`. This lets grains grow to the output spacing when lowering
+pitch, so no gaps open between them. They never read more than about one source period per
+side unless the grain is being compressed, which would put two glottal pulses into one grain.
 
 ### Measured end to end (tests + harness)
 
@@ -461,8 +474,6 @@ break them. They're also exposed as host programs. User presets are XML files in
 * **Hard-tune warble.** A vocal sitting right on a boundary between two allowed notes flips
   between them at 0 ms. That's the classic hard-tune warble, kept on purpose (0.15 st
   hysteresis). A "note stickiness" control is an easy addition if wanted.
-* **Throat brightening.** Below 100% it reaches roughly 60% of the ideal envelope shift in log
-  terms; darkening reaches almost all of it.
 * **Voiced consonants.** z / v may be classed unvoiced and passed through uncorrected.
 * **Very high notes.** Above ~1.2 kHz pitch estimates carry a ~4 ct static bias (inaudible).
 

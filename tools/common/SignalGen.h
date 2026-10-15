@@ -12,6 +12,39 @@
 namespace evox::tools
 {
 
+/** Portable random numbers. std::mt19937 is fully specified by the standard, but the
+    std::*_distribution algorithms are not (libstdc++, libc++ and MSVC differ), which made
+    "the same" test voice differ between Linux, macOS and Windows. These helpers derive
+    everything from raw mt19937 output so every platform renders identical signals. */
+class PortableRng
+{
+public:
+    explicit PortableRng (unsigned seed) : engine_ (seed) {}
+
+    /** Uniform in (0, 1). */
+    double uniform() { return (static_cast<double> (engine_()) + 0.5) / 4294967296.0; }
+
+    /** Standard normal via Box-Muller. */
+    double gauss()
+    {
+        if (hasSpare_)
+        {
+            hasSpare_ = false;
+            return spare_;
+        }
+        const double r = std::sqrt (-2.0 * std::log (uniform()));
+        const double theta = 2.0 * std::numbers::pi * uniform();
+        spare_ = r * std::sin (theta);
+        hasSpare_ = true;
+        return r * std::cos (theta);
+    }
+
+private:
+    std::mt19937 engine_;
+    double spare_ = 0.0;
+    bool hasSpare_ = false;
+};
+
 struct TestSignal
 {
     std::vector<float> samples;
@@ -74,8 +107,8 @@ inline TestSignal sawtooth (double fs, double seconds, const PitchCurve& pitch, 
 inline TestSignal synthVoice (double fs, double seconds, const PitchCurve& pitch,
                               float breathiness = 0.02f, unsigned seed = 1, double formantScale = 1.0)
 {
-    std::mt19937 rng (seed);
-    std::normal_distribution<double> gauss (0.0, 1.0);
+    PortableRng rng (seed);
+    auto gauss = [&rng] (PortableRng&) { return rng.gauss(); };
 
     double jitterState = 0.0;
     auto jittered = [&] (double t) {
@@ -123,8 +156,8 @@ inline TestSignal synthVoice (double fs, double seconds, const PitchCurve& pitch
 
 inline TestSignal whiteNoise (double fs, double seconds, float gain = 0.3f, unsigned seed = 7)
 {
-    std::mt19937 rng (seed);
-    std::uniform_real_distribution<float> uni (-1.0f, 1.0f);
+    PortableRng rng (seed);
+    auto uni = [] (PortableRng& r) { return static_cast<float> (2.0 * r.uniform() - 1.0); };
     const auto n = static_cast<size_t> (fs * seconds);
     TestSignal s { std::vector<float> (n), std::vector<float> (n, 0.0f) };
     for (auto& x : s.samples)

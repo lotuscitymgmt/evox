@@ -28,7 +28,8 @@ namespace evox::dsp
       - Formants: a grain read at speed 1/alpha is stretched by alpha, which scales its
         spectral envelope by 1/alpha while the pitch stays set by the grain spacing.
         alpha = throat (formant correction on), or throat / ratio (off -> "chipmunk").
-        The output grain length depends only on Character; alpha sets how much source it reads (2H/alpha).
+        Output grain length follows Character and the output spacing; alpha sets how much
+        source it reads (2H/alpha), never more than ~one period per side unless compressing.
       - Fractional positions on both sides use 4-point Hermite interpolation.
       - Presence shelf: short, peaky grains smooth the spectral envelope and cost ~2-3 dB
         above 3 kHz. A Character-linked high shelf (3.5 kHz, 0 -> +5 dB) more than gives it
@@ -86,7 +87,7 @@ private:
     void rebuildWindow (float character) noexcept;
     float window (float x) const noexcept;
     float grainStretch (float ratio) const noexcept;
-    float sourceHalfLength (float period, float alpha) const noexcept;
+    float outputHalfLength (float period, float alpha, float ratio) const noexcept;
     float readHermite (int channel, double position) const noexcept;
     void placeGrain (double ts, float period, float ratio, std::int64_t p, int numChannels) noexcept;
 

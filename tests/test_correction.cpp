@@ -324,41 +324,47 @@ TEST_CASE ("shifter: unvoiced audio passes through unshifted")
 
 TEST_CASE ("formant: correction keeps the envelope, throat moves it independently of pitch")
 {
+    // Each output is compared with *ideal* references rendered at the same output pitch:
+    // the synthetic vowel with its formants where they should be, and where they should not.
+    // (Comparing against the input is biased: the harmonic-envelope measure itself depends
+    // on f0.) Breath-free source so the k^2 tilt correction never amplifies noise, and
+    // Character 0 so the presence shelf doesn't colour the comparison.
     const double fs = 48000.0;
-    const auto in = tools::synthVoice (fs, 1.0, tools::constantPitch (150.0));
+    const auto in = tools::synthVoice (fs, 1.0, tools::constantPitch (150.0), 0.0f);
     const size_t from = 24000, n = 8192;
     const double d3 = 146.832; // 150 Hz snaps to D3 first
-    const double inEnv = test::harmonicEnvelopeCentroid (in.samples, from, n, fs, 150.0);
 
-    auto envelopeFor = [&] (bool formant, float throat, float transpose) {
-        dsp::EngineParams p;
-        p.correction.transpose = transpose;
-        p.shifter.formantCorrection = formant;
-        p.shifter.throat = throat;
-        const auto out = test::renderEngine (in.samples, fs, p);
-        return test::harmonicEnvelopeCentroid (out, from, n, fs, d3 * std::exp2 (transpose / 12.0));
+    auto envelope = [&] (const std::vector<float>& v, double f0) { return test::harmonicEnvelopeCentroid (v, from, n, fs, f0); };
+    auto ideal = [&] (double f0, double formantScale) {
+        return envelope (tools::synthVoice (fs, 1.0, tools::constantPitch (f0), 0.0f, 1, formantScale).samples, f0);
     };
 
-    const double upKept = envelopeFor (true, 1.0f, 12.0f);
-    const double downKept = envelopeFor (true, 1.0f, -12.0f);
-    const double upChipmunk = envelopeFor (false, 1.0f, 12.0f);
-    const double downMonster = envelopeFor (false, 1.0f, -12.0f);
-    const double throatNeutral = envelopeFor (true, 1.0f, 0.0f);
-    const double throatLong = envelopeFor (true, 1.5f, 0.0f);
-    const double throatShort = envelopeFor (true, 0.7f, 0.0f);
+    struct Case { const char* name; bool formant; float throat, transpose; double expectedScale, wrongScale; };
+    const Case cases[] = {
+        { "+12 st, formant on", true, 1.0f, 12.0f, 1.0, 2.0 },
+        { "-12 st, formant on", true, 1.0f, -12.0f, 1.0, 0.5 },
+        { "+12 st, formant off (chipmunk)", false, 1.0f, 12.0f, 2.0, 1.0 },
+        { "-12 st, formant off (monster)", false, 1.0f, -12.0f, 0.5, 1.0 },
+        { "throat 150%", true, 1.5f, 0.0f, 1.0 / 1.5, 1.0 },
+        { "throat 70%", true, 0.7f, 0.0f, 1.0 / 0.7, 1.0 },
+    };
 
-    const std::string msg = "in " + std::to_string (inEnv) + " | +12 kept " + std::to_string (upKept) + " -12 kept "
-                          + std::to_string (downKept) + " | +12 off " + std::to_string (upChipmunk) + " -12 off "
-                          + std::to_string (downMonster) + " | throat100 " + std::to_string (throatNeutral) + " throat150 " + std::to_string (throatLong) + " throat70 "
-                          + std::to_string (throatShort);
+    for (const auto& c : cases)
+    {
+        dsp::EngineParams p;
+        p.correction.transpose = c.transpose;
+        p.shifter.formantCorrection = c.formant;
+        p.shifter.throat = c.throat;
+        p.shifter.character = 0.0f;
+        const double f0 = d3 * std::exp2 (c.transpose / 12.0);
+        const double got = envelope (test::renderEngine (in.samples, fs, p), f0);
+        const double expected = ideal (f0, c.expectedScale), wrong = ideal (f0, c.wrongScale);
 
-    CHECK_MSG (std::abs (upKept / inEnv - 1.0) < 0.1, msg);   // formant correction: envelope stays put
-    CHECK_MSG (std::abs (downKept / inEnv - 1.0) < 0.1, msg);
-    CHECK_MSG (upChipmunk > 1.2 * inEnv, msg);                 // off: envelope follows pitch up...
-    CHECK_MSG (downMonster < 0.8 * inEnv, msg);                // ...and down
-    // Throat relative to the same engine at 100% (Character itself slightly smooths the envelope).
-    CHECK_MSG (throatLong < 0.8 * throatNeutral, msg);         // longer tract: darker  (ideal 0.71x)
-    CHECK_MSG (throatShort > 1.12 * throatNeutral, msg);       // shorter tract: brighter (ideal 1.28x, we reach ~1.15x)
+        const std::string msg = std::string (c.name) + ": got " + std::to_string (got) + ", ideal " + std::to_string (expected)
+                              + ", wrong-answer ideal " + std::to_string (wrong);
+        CHECK_MSG (std::abs (std::log (got / expected)) < std::log (1.12), msg);                      // within 12 % of ideal
+        CHECK_MSG (std::abs (std::log (got / expected)) < std::abs (std::log (got / wrong)) * 0.5, msg); // clearly the right side
+    }
 }
 
 TEST_CASE ("character: clean is spectrally transparent, hard is brighter")
