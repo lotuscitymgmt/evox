@@ -3,6 +3,7 @@
 // Minimal WAV reader/writer for offline tools and tests (never used on the audio thread).
 // Reads 16/24/32-bit PCM and 32-bit float, including WAVE_FORMAT_EXTENSIBLE.
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <fstream>

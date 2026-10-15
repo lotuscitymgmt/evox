@@ -2,6 +2,7 @@
 
 // Deterministic test-signal generators with known ground-truth f0.
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <numbers>

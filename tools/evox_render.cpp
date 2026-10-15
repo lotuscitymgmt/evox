@@ -1,11 +1,12 @@
 // Offline renderer: runs a WAV through the complete EVOX engine.
 //   evox_render in.wav out.wav [--retune ms] [--humanize 0..100] [--key C..B] [--scale chromatic|major|minor]
 //               [--transpose st] [--type soprano|alto|low|instrument] [--character 0..100]
-//               [--throat 50..180] [--formant on|off] [--vibrato sine|square|saw] [--mix 0..100]
+//               [--throat 50..180] [--formant on|off] [--vibrato sine|square|saw] [--mix 0..100] [--os2x]
 
 #include "common/WavFile.h"
 #include "dsp/EvoxEngine.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -23,9 +24,18 @@ int main (int argc, char** argv)
     dsp::EngineParams p;
     static const char* keys[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 
-    for (int i = 3; i + 1 < argc; i += 2)
+    for (int i = 3; i < argc; i += 2)
     {
-        const std::string opt = argv[i], val = argv[i + 1];
+        const std::string opt = argv[i];
+        if (opt == "--os2x")
+        {
+            p.oversample2x = true;
+            --i; // flag without a value
+            continue;
+        }
+        if (i + 1 >= argc)
+            break;
+        const std::string val = argv[i + 1];
         if (opt == "--retune") p.correction.retuneMs = std::stof (val);
         else if (opt == "--humanize") p.correction.humanize = std::stof (val) / 100.0f;
         else if (opt == "--transpose") p.correction.transpose = std::stof (val);

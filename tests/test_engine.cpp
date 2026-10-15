@@ -3,6 +3,7 @@
 #include "common/SignalGen.h"
 #include "dsp/EvoxEngine.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <new>
@@ -134,6 +135,7 @@ TEST_CASE ("engine: process() performs zero heap allocations")
         p.tracking = 0.25f * it;
         p.mix = 1.0f - 0.2f * it;
         p.bypass = it == 3;
+        p.oversample2x = it % 2 == 1;
         e.setParams (p);
         runBlocks (e, audio, 128);
         runBlocks (e, audio, 37, true);

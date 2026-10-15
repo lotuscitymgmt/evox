@@ -98,6 +98,7 @@ private:
         std::atomic<float>* throat = nullptr;
         std::atomic<float>* mix = nullptr;
         std::atomic<float>* outputGain = nullptr;
+        std::atomic<float>* oversampling = nullptr;
     } raw_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EvoxAudioProcessor)

@@ -4,6 +4,7 @@
 #include "dsp/PitchCorrector.h"
 #include "dsp/ScaleQuantizer.h"
 
+#include <algorithm>
 #include <string>
 
 using namespace evox;

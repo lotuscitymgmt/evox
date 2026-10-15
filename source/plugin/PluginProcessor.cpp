@@ -46,6 +46,7 @@ EvoxAudioProcessor::EvoxAudioProcessor()
     raw_.throat = get (ParamID::throat);
     raw_.mix = get (ParamID::mix);
     raw_.outputGain = get (ParamID::outputGain);
+    raw_.oversampling = get (ParamID::oversampling);
 
     // Report a sensible latency before prepareToPlay so scanners see the real value.
     setLatencySamples (dsp::EvoxEngine::latencyFor (44100.0));
@@ -84,6 +85,7 @@ dsp::EngineParams EvoxAudioProcessor::readParams() const noexcept
     p.lowCut = flag (raw_.lowCut);
     p.mix = raw_.mix->load() * 0.01f;
     p.outputGainDb = raw_.outputGain->load();
+    p.oversample2x = index (raw_.oversampling, 1) == 1;
 
     auto& c = p.correction;
     c.key = index (raw_.key, 11);

@@ -60,6 +60,18 @@ void PsolaShifter::reset() noexcept
     started_ = false;
 }
 
+void PsolaShifter::restartSynthesis() noexcept
+{
+    for (int ch = 0; ch < maxChannels; ++ch)
+    {
+        std::fill (accum_[static_cast<size_t> (ch)].begin(), accum_[static_cast<size_t> (ch)].end(), 0.0f);
+        presence_[static_cast<size_t> (ch)].reset();
+    }
+    cursor_ = {};
+    markSearch_ = 0;
+    started_ = false;
+}
+
 void PsolaShifter::setSettings (const Settings& s) noexcept
 {
     settings_ = s;
@@ -212,9 +224,11 @@ void PsolaShifter::render (std::int64_t p, const CorrectionTrack& track, float* 
     // Place every grain whose left edge has reached the output point.
     for (int guard = 0; guard < 64; ++guard)
     {
-        const auto decision = track.at (cursor_, static_cast<std::int64_t> (nextSynthesis_));
+        const auto trackIndex = static_cast<std::int64_t> (std::floor ((nextSynthesis_ - trackOffset_) / trackScale_));
+        const auto decision = track.at (cursor_, trackIndex);
         const bool voiced = decision.voiced && decision.periodSamples > 0.0f;
-        const float period = voiced ? std::clamp (decision.periodSamples, 8.0f, maxPeriod_) : marker_.getUnvoicedPeriod();
+        const float period = voiced ? std::clamp (decision.periodSamples * static_cast<float> (trackScale_), 8.0f, maxPeriod_)
+                                    : marker_.getUnvoicedPeriod();
         const float ratio = voiced ? std::clamp (decision.ratio, 0.25f, 4.0f) : 1.0f;
 
         const float alpha = grainStretch (ratio);

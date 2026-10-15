@@ -3,6 +3,7 @@
 #include "CorrectionTrack.h"
 #include "DelayLine.h"
 #include "InputConditioner.h"
+#include "Oversampler2x.h"
 #include "PitchAnalyzer.h"
 #include "PitchCorrector.h"
 #include "PsolaShifter.h"
@@ -26,6 +27,7 @@ struct EngineParams
     float mix = 1.0f;           // 0 dry .. 1 wet
     float outputGainDb = 0.0f;
     bool bypass = false;
+    bool oversample2x = false;           // run the character (PSOLA) stage at 2x
 
     CorrectorSettings correction;        // key/scale/retune/humanize/vibrato/transpose...
     PsolaShifter::Settings shifter;      // character / formant / throat
@@ -66,11 +68,16 @@ public:
     static constexpr int maxChannels = 2;
     /** Lookahead reserved for the TD-PSOLA synthesis stage (see README "Latency"). */
     static constexpr double lookaheadMs = 9.0;
+    /** Up + down half-band delay of the 2x character stage, in base samples. It is reserved
+        in both modes so toggling oversampling never changes the reported latency. */
+    static constexpr int oversamplingDelay = (HalfbandKernel::taps - 1) / 2;
 
-    static int latencyFor (double sampleRate) noexcept
+    static int coreLatencyFor (double sampleRate) noexcept
     {
         return static_cast<int> (lookaheadMs * 0.001 * sampleRate + 0.5);
     }
+
+    static int latencyFor (double sampleRate) noexcept { return coreLatencyFor (sampleRate) + oversamplingDelay; }
 
     void prepare (double sampleRate, int maxBlockSize, int numChannels);
     void reset() noexcept;
@@ -87,7 +94,8 @@ public:
     SpscFifo<AnalysisFrame, 1024>& getAnalysisFifo() noexcept { return analysisFifo_; }
     LevelMeters& getMeters() noexcept { return meters_; }
     const PitchAnalyzer& getAnalyzer() const noexcept { return analyzer_; }
-    const PsolaShifter& getShifter() const noexcept { return shifter_; }
+    const PsolaShifter& getShifter() const noexcept { return oversamplingActive_ ? shifter2x_ : shifter_; }
+    bool isOversamplingActive() const noexcept { return oversamplingActive_; }
 
 private:
     void onNewEstimate() noexcept;
@@ -98,7 +106,14 @@ private:
     bool paramsInitialised_ = false;
 
     std::array<InputConditioner, maxChannels> conditioners_;
-    std::array<DelayLine, maxChannels> dryDelay_;
+    std::array<DelayLine, maxChannels> dryDelay_, wetPad_;
+    std::array<Upsampler2x, maxChannels> upsamplers_;
+    std::array<Downsampler2x, maxChannels> downsamplers_;
+    PsolaShifter shifter2x_;
+    LinearSmoother oversamplingFade_;
+    bool oversamplingActive_ = false;
+    int coreLatency_ = 0;
+    int warmupRemaining_ = 0, warmupLength_ = 0; // feeding the inactive stage before a switch
     PitchAnalyzer analyzer_;
     PitchCorrector corrector_;
     CorrectionTrack track_;

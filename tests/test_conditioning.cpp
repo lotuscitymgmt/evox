@@ -6,6 +6,7 @@
 #include "dsp/InputConditioner.h"
 #include "dsp/VoicingDetector.h"
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <numbers>

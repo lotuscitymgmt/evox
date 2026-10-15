@@ -37,7 +37,7 @@ add_library(evox_dsp STATIC
 target_include_directories(evox_dsp PUBLIC source)
 target_compile_features(evox_dsp PUBLIC cxx_std_20)
 if(MSVC)
-    target_compile_options(evox_dsp PRIVATE /W4 /fp:fast)
+    target_compile_options(evox_dsp PRIVATE /W4)
 else()
     target_compile_options(evox_dsp PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion)
 endif()
@@ -77,7 +77,7 @@ if(EVOX_BUILD_PLUGIN)
         resources/fonts/Inter-SemiBold.ttf
         resources/fonts/Inter-Bold.ttf)
 
-    target_sources(EVOX PRIVATE
+    set(EVOX_PLUGIN_SOURCES
         source/plugin/Parameters.cpp
         source/plugin/PresetManager.cpp
         source/plugin/PluginProcessor.cpp
@@ -88,6 +88,8 @@ if(EVOX_BUILD_PLUGIN)
         source/plugin/ui/PitchDisplay.cpp
         source/plugin/ui/NoteKeyboard.cpp
         source/plugin/ui/Panels.cpp)
+
+    target_sources(EVOX PRIVATE ${EVOX_PLUGIN_SOURCES})
 
     target_include_directories(EVOX PRIVATE source source/plugin)
 
@@ -109,26 +111,26 @@ if(EVOX_BUILD_PLUGIN)
             juce::juce_recommended_warning_flags)
 
 
-    # Offline editor snapshot (renders the real UI with live engine data to PNG).
+    # Console apps that compile the plugin sources directly (no plugin wrapper):
+    #   evox_plugin_tests - JUCE-level tests (state, presets, A/B, latency, bypass, layouts)
+    #   evox_snapshot     - renders the real editor with live engine data to PNG
+    option(EVOX_BUILD_PLUGIN_TESTS "Build JUCE-level plugin tests" ON)
     option(EVOX_BUILD_SNAPSHOT "Build the evox_snapshot UI rendering tool" OFF)
+
+    function(evox_add_plugin_console_app name source)
+        juce_add_console_app(${name} PRODUCT_NAME "${name}")
+        target_sources(${name} PRIVATE ${source} ${EVOX_PLUGIN_SOURCES})
+        target_include_directories(${name} PRIVATE source source/plugin tools)
+        target_compile_definitions(${name} PRIVATE JucePlugin_Name="EVOX" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+        target_link_libraries(${name} PRIVATE evox_dsp EvoxAssets juce::juce_audio_utils juce::juce_dsp
+                                              juce::juce_recommended_config_flags)
+    endfunction()
+
+    if(EVOX_BUILD_PLUGIN_TESTS)
+        evox_add_plugin_console_app(evox_plugin_tests tests/plugin_tests.cpp)
+    endif()
     if(EVOX_BUILD_SNAPSHOT)
-        juce_add_console_app(evox_snapshot PRODUCT_NAME "evox_snapshot")
-        target_sources(evox_snapshot PRIVATE
-            tools/evox_snapshot.cpp
-            source/plugin/Parameters.cpp
-            source/plugin/PresetManager.cpp
-            source/plugin/PluginProcessor.cpp
-            source/plugin/PluginEditor.cpp
-            source/plugin/ui/Theme.cpp
-            source/plugin/ui/EvoxLookAndFeel.cpp
-            source/plugin/ui/Knob.cpp
-            source/plugin/ui/PitchDisplay.cpp
-            source/plugin/ui/NoteKeyboard.cpp
-            source/plugin/ui/Panels.cpp)
-        target_include_directories(evox_snapshot PRIVATE source source/plugin tools)
-        target_compile_definitions(evox_snapshot PRIVATE JucePlugin_Name="EVOX" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
-        target_link_libraries(evox_snapshot PRIVATE evox_dsp EvoxAssets juce::juce_audio_utils juce::juce_dsp
-                                                    juce::juce_recommended_config_flags)
+        evox_add_plugin_console_app(evox_snapshot tools/evox_snapshot.cpp)
     endif()
 endif()
 
@@ -139,4 +141,7 @@ if(EVOX_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
     add_subdirectory(tools)
+    if(EVOX_BUILD_PLUGIN AND EVOX_BUILD_PLUGIN_TESTS)
+        add_test(NAME evox_plugin_tests COMMAND evox_plugin_tests)
+    endif()
 endif()

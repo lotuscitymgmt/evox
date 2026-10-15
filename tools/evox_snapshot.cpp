@@ -7,6 +7,7 @@
 #include "common/SignalGen.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <typeinfo>
 
 int main (int argc, char** argv)
 {
@@ -64,6 +65,40 @@ int main (int argc, char** argv)
     }
     for (int i = 0; i < 4; ++i)
         evoxEditor->tickForSnapshot();
+
+    for (int i = 1; i < argc; ++i)
+        if (juce::String (argv[i]) == "--bench-paint")
+        {
+            // Full-editor paint cost (worst case: everything repainted every frame).
+            juce::Image target (juce::Image::ARGB, w, h, true);
+            const int frames = 120;
+            const double t0 = juce::Time::getMillisecondCounterHiRes();
+            for (int f = 0; f < frames; ++f)
+            {
+                juce::Graphics g (target);
+                editor->paintEntireComponent (g, true);
+            }
+            const double ms = (juce::Time::getMillisecondCounterHiRes() - t0) / frames;
+            std::printf ("full editor paint (%dx%d, software renderer): %.2f ms/frame = %.1f%% of a 60 fps frame budget\n",
+                         w, h, ms, 100.0 * ms / (1000.0 / 60.0));
+
+            // Per child: what actually repaints at 60 fps while audio plays.
+            for (auto* child : editor->getChildren())
+            {
+                if (child->getWidth() < 2)
+                    continue;
+                juce::Image img (juce::Image::ARGB, child->getWidth(), child->getHeight(), true);
+                const double c0 = juce::Time::getMillisecondCounterHiRes();
+                for (int f = 0; f < frames; ++f)
+                {
+                    juce::Graphics g (img);
+                    child->paintEntireComponent (g, true);
+                }
+                const double cms = (juce::Time::getMillisecondCounterHiRes() - c0) / frames;
+                if (cms > 0.05)
+                    std::printf ("  %-28s %4dx%-4d %.2f ms\n", typeid (*child).name(), child->getWidth(), child->getHeight(), cms);
+            }
+        }
 
     const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, scale);
     juce::File file (juce::File::getCurrentWorkingDirectory().getChildFile (out));

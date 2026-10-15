@@ -2,6 +2,8 @@
 
 #include "../Parameters.h"
 
+#include <algorithm>
+
 namespace evox::ui
 {
 
@@ -29,6 +31,7 @@ void PitchDisplay::addFrame (const dsp::AnalysisFrame& f, double sampleRate)
     count_ = std::min (count_ + 1, history_.size());
 
     latestTime_ = p.time;
+    dirty_ = true;
     wallAtLatest_ = juce::Time::getMillisecondCounterHiRes() * 0.001;
     currentTarget_ = p.targetMidi;
 
@@ -47,8 +50,14 @@ void PitchDisplay::tick (double nowSeconds)
     // glides at 60 fps, but never run more than 60 ms ahead of real data (stops when the
     // transport stops).
     const double ahead = juce::jlimit (0.0, 0.06, nowSeconds - wallAtLatest_);
-    displayTime_ = latestTime_ + ahead;
+    const double newTime = latestTime_ + ahead;
     lastWallClock_ = nowSeconds;
+
+    // Idle (transport stopped, nothing changed): no repaint at all.
+    if (! dirty_ && std::abs (newTime - displayTime_) < 1.0e-6)
+        return;
+    displayTime_ = newTime;
+    dirty_ = false;
     repaint();
 }
 
@@ -191,12 +200,14 @@ void PitchDisplay::paint (juce::Graphics& g)
 void PitchDisplay::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w)
 {
     spanSemitones_ = juce::jlimit (8.0f, 48.0f, spanSemitones_ * (w.deltaY > 0 ? 0.9f : 1.1f));
+    dirty_ = true;
     repaint();
 }
 
 void PitchDisplay::mouseDoubleClick (const juce::MouseEvent&)
 {
     spanSemitones_ = 18.0f;
+    dirty_ = true;
     repaint();
 }
 
@@ -205,14 +216,21 @@ void PitchDisplay::mouseDoubleClick (const juce::MouseEvent&)
 void CorrectionMeter::setCents (float cents, bool active) noexcept
 {
     target_ = juce::jlimit (-100.0f, 100.0f, cents);
+    const bool activeChanged = active != active_;
     active_ = active;
     // Light smoothing for readability; still tracks a 0 ms step within ~3 frames.
+    const float previous = shown_;
     shown_ += ((active_ ? target_ : 0.0f) - shown_) * 0.5f;
-    repaint();
+    if (activeChanged || std::abs (shown_ - previous) > 0.05f || ! everPainted_)
+    {
+        everPainted_ = true;
+        repaint();
+    }
 }
 
 void CorrectionMeter::paint (juce::Graphics& g)
 {
+    g.fillAll (Colours::background); // opaque: 60 fps repaints never touch the editor behind
     auto b = getLocalBounds().toFloat();
     drawPanel (g, b, 8.0f, Colours::panel);
 

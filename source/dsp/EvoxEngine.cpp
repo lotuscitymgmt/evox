@@ -9,6 +9,7 @@ namespace evox::dsp
 void EvoxEngine::prepare (double sampleRate, int /*maxBlockSize*/, int /*numChannels*/)
 {
     sampleRate_ = sampleRate;
+    coreLatency_ = coreLatencyFor (sampleRate);
     latency_ = latencyFor (sampleRate);
 
     for (int ch = 0; ch < maxChannels; ++ch)
@@ -16,10 +17,18 @@ void EvoxEngine::prepare (double sampleRate, int /*maxBlockSize*/, int /*numChan
         conditioners_[static_cast<size_t> (ch)].prepare (sampleRate);
         dryDelay_[static_cast<size_t> (ch)].prepare (latency_);
         dryDelay_[static_cast<size_t> (ch)].setDelay (latency_);
+        wetPad_[static_cast<size_t> (ch)].prepare (oversamplingDelay);
+        wetPad_[static_cast<size_t> (ch)].setDelay (oversamplingDelay);
     }
 
     analyzer_.prepare (sampleRate);
-    shifter_.prepare (sampleRate, latency_, pitchRangeFor (InputType::instrument).minHz);
+    const float lowest = pitchRangeFor (InputType::instrument).minHz;
+    shifter_.prepare (sampleRate, coreLatency_, lowest);
+    // 2x stage: its index n holds base-rate audio from (n - upsampler delay) / 2.
+    shifter2x_.prepare (2.0 * sampleRate, 2 * coreLatency_, lowest);
+    shifter2x_.setTrackMapping (2.0, double (HalfbandKernel::centre));
+    oversamplingFade_.prepare (sampleRate, 0.005);
+    warmupLength_ = static_cast<int> (0.06 * sampleRate); // > 3 periods of the lowest note
 
     mix_.prepare (sampleRate, 0.02);
     gain_.prepare (sampleRate, 0.02);
@@ -41,12 +50,19 @@ void EvoxEngine::reset() noexcept
     {
         conditioners_[static_cast<size_t> (ch)].reset();
         dryDelay_[static_cast<size_t> (ch)].reset();
+        wetPad_[static_cast<size_t> (ch)].reset();
+        upsamplers_[static_cast<size_t> (ch)].reset();
+        downsamplers_[static_cast<size_t> (ch)].reset();
     }
     analyzer_.reset();
     corrector_.reset();
     track_.reset();
     voicingCursor_ = {};
     shifter_.reset();
+    shifter2x_.reset();
+    oversamplingActive_ = params_.oversample2x;
+    oversamplingFade_.setImmediate (1.0f);
+    warmupRemaining_ = 0;
     now_ = 0;
     detectedPeriod_ = 0.0f;
     detectedVoiced_ = false;
@@ -67,6 +83,14 @@ void EvoxEngine::setParams (const EngineParams& p) noexcept
 
     corrector_.setSettings (p.correction);
     shifter_.setSettings (p.shifter);
+    shifter2x_.setSettings (p.shifter);
+
+    // Oversampling switch: warm the incoming stage for 60 ms, fade out, swap, fade in
+    // (state machine in process()).
+    if (! paramsInitialised_)
+        oversamplingActive_ = p.oversample2x;
+    else if (p.oversample2x != oversamplingActive_ && warmupRemaining_ == 0 && oversamplingFade_.getTarget() > 0.0f)
+        warmupRemaining_ = warmupLength_;
 
     const float gainLin = std::pow (10.0f, p.outputGainDb / 20.0f);
     const float bypassTarget = p.bypass ? 1.0f : 0.0f;
@@ -160,18 +184,67 @@ void EvoxEngine::process (float* const* channels, int numChannels, int numSample
         if (analyzer_.push (mono))
             onNewEstimate();
 
+        // The 1x stage is always fed (it also serves the unshifted/unvoiced path). The 2x
+        // stage is fed only while active or warming up for a switch.
         shifter_.pushInput (conditioned, numChannels, mono, now_, detectedPeriod_, detectedVoiced_);
+        if (oversamplingActive_ || warmupRemaining_ > 0 || params_.oversample2x != oversamplingActive_)
+        {
+            float up0[maxChannels] {}, up1[maxChannels] {};
+            float mono0 = 0.0f, mono1 = 0.0f;
+            for (int ch = 0; ch < numChannels; ++ch)
+            {
+                upsamplers_[static_cast<size_t> (ch)].process (conditioned[ch], up0[ch], up1[ch]);
+                mono0 += up0[ch];
+                mono1 += up1[ch];
+            }
+            shifter2x_.pushInput (up0, numChannels, mono0 * monoScale, 2 * now_, 2.0f * detectedPeriod_, detectedVoiced_);
+            shifter2x_.pushInput (up1, numChannels, mono1 * monoScale, 2 * now_ + 1, 2.0f * detectedPeriod_, detectedVoiced_);
+        }
 
-        // Output point: the input sample `latency` samples ago.
+        // Oversampling switch: warm-up done -> fade out; faded out -> swap, restart, fade in.
+        if (warmupRemaining_ > 0 && --warmupRemaining_ == 0)
+            oversamplingFade_.setTarget (0.0f);
+
+        if (oversamplingActive_ != params_.oversample2x && warmupRemaining_ == 0 && ! oversamplingFade_.isSmoothing()
+            && oversamplingFade_.getTarget() <= 0.0f)
+        {
+            oversamplingActive_ = params_.oversample2x;
+            (oversamplingActive_ ? shifter2x_ : shifter_).restartSynthesis();
+            for (int ch = 0; ch < maxChannels; ++ch)
+            {
+                wetPad_[static_cast<size_t> (ch)].reset();
+                downsamplers_[static_cast<size_t> (ch)].reset();
+            }
+            oversamplingFade_.setTarget (1.0f);
+        }
+
+        // Output point: the input sample `latency` samples ago. The PSOLA stage renders
+        // `coreLatency` behind the input; the 31-sample remainder is the half-band filters
+        // at 2x, or an equal fixed pad at 1x.
         const std::int64_t p = now_ - latency_;
-        ++now_;
+        const std::int64_t renderPoint = now_ - coreLatency_;
 
         float shifted[maxChannels] {};
-        if (p >= 0)
+        if (renderPoint >= 0)
         {
-            shifter_.render (p, track_, shifted, numChannels);
-            voicedFade_.setTarget (track_.at (voicingCursor_, p).voiced ? 1.0f : 0.0f);
+            if (oversamplingActive_)
+            {
+                float a[maxChannels] {}, b[maxChannels] {};
+                shifter2x_.render (2 * renderPoint, track_, a, numChannels);
+                shifter2x_.render (2 * renderPoint + 1, track_, b, numChannels);
+                for (int ch = 0; ch < numChannels; ++ch)
+                    shifted[ch] = downsamplers_[static_cast<size_t> (ch)].process (a[ch], b[ch]);
+            }
+            else
+            {
+                shifter_.render (renderPoint, track_, shifted, numChannels);
+                for (int ch = 0; ch < numChannels; ++ch)
+                    shifted[ch] = wetPad_[static_cast<size_t> (ch)].process (shifted[ch]);
+            }
         }
+        if (p >= 0)
+            voicedFade_.setTarget (track_.at (voicingCursor_, p).voiced ? 1.0f : 0.0f);
+        ++now_;
 
         // Unvoiced audio (s, t, breaths) skips the shifter: crossfade to the unshifted input.
         const float voiced = voicedFade_.next();
@@ -193,8 +266,14 @@ void EvoxEngine::process (float* const* channels, int numChannels, int numSample
             const float target = energyWet_ > 1.0e-9f ? std::clamp (std::sqrt (energyIn_ / energyWet_), 0.25f, 4.0f) : 1.0f;
             levelGain_ += (target - levelGain_) * levelCoeff_;
         }
+        // During an oversampling switch the shifted path dips towards the unshifted input
+        // (never to silence) for 5 ms each way.
+        const float osFade = oversamplingFade_.next();
         for (int ch = 0; ch < numChannels; ++ch)
-            shifted[ch] *= levelGain_;
+        {
+            const float u = p >= 0 ? shifter_.readInput (ch, p) : 0.0f;
+            shifted[ch] = osFade * shifted[ch] * levelGain_ + (1.0f - osFade) * u;
+        }
         const float mix = mix_.next();
         const float gain = gain_.next();
         const float bypass = bypassFade_.next();

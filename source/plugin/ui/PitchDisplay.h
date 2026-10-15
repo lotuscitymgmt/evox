@@ -24,7 +24,11 @@ public:
     /** Advance the scroll position; called every UI tick. */
     void tick (double nowSeconds);
     void setReferencePitch (float hz) noexcept { referenceHz_ = hz; }
-    void setNoteStates (const std::array<bool, 12>& isTarget) noexcept { targets_ = isTarget; }
+    void setNoteStates (const std::array<bool, 12>& isTarget) noexcept
+    {
+        dirty_ |= isTarget != targets_;
+        targets_ = isTarget;
+    }
 
     void paint (juce::Graphics&) override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
@@ -52,18 +56,20 @@ private:
     float centreMidi_ = 60.0f, spanSemitones_ = 18.0f;
     float currentTarget_ = -1.0f;
     std::array<bool, 12> targets_ {};
+    bool dirty_ = true;
 };
 
 /** Center-zero horizontal meter: cents of correction applied right now (+/-100). */
 class CorrectionMeter final : public juce::Component
 {
 public:
+    CorrectionMeter() { setOpaque (true); }
     void setCents (float cents, bool active) noexcept;
     void paint (juce::Graphics&) override;
 
 private:
     float shown_ = 0.0f, target_ = 0.0f;
-    bool active_ = false;
+    bool active_ = false, everPainted_ = false;
 };
 
 } // namespace evox::ui

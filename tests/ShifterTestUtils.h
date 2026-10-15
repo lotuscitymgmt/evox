@@ -4,6 +4,7 @@
 #include "dsp/EvoxEngine.h"
 #include "dsp/Fft.h"
 
+#include <algorithm>
 #include <array>
 
 #include <cmath>

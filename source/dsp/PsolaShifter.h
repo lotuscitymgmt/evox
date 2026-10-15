@@ -48,6 +48,18 @@ public:
     };
 
     void prepare (double sampleRate, int latencySamples, float lowestHz);
+
+    /** Maps this shifter's sample index to the CorrectionTrack's (base-rate) index:
+        base = (index - offset) / scale. Identity at 1x; scale 2, offset = upsampler delay at 2x. */
+    void setTrackMapping (double scale, double offset) noexcept
+    {
+        trackScale_ = scale;
+        trackOffset_ = offset;
+    }
+
+    /** Drops pending grains and restarts synthesis at the next render() (input history and
+        pitch marks are kept, so the restart is immediate). Used when switching oversampling. */
+    void restartSynthesis() noexcept;
     void reset() noexcept;
     void setSettings (const Settings& s) noexcept;
 
@@ -97,6 +109,7 @@ private:
     std::int64_t now_ = 0, markSearch_ = 0, grains_ = 0;
     bool started_ = false;
     float maxPeriod_ = 1000.0f;
+    double trackScale_ = 1.0, trackOffset_ = 0.0;
 };
 
 } // namespace evox::dsp

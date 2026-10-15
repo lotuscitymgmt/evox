@@ -208,12 +208,16 @@ void NoteKeyboard::paint (juce::Graphics& g)
 
 // ------------------------------------------------------------------------------------
 
-LevelMeter::LevelMeter (juce::String caption) : caption_ (std::move (caption)) {}
+LevelMeter::LevelMeter (juce::String caption) : caption_ (std::move (caption))
+{
+    setOpaque (true); // sits inside the right panel and fills with its colour itself
+}
 
 void LevelMeter::push (float peak, float rms) noexcept
 {
     const float pDb = juce::Decibels::gainToDecibels (peak, -100.0f);
     const float rDb = juce::Decibels::gainToDecibels (rms, -100.0f);
+    const float before[] { peakDb_, rmsDb_, holdDb_ };
 
     // Ballistics at 60 Hz: instant attack, ~20 dB/s peak fall, smoother RMS.
     peakDb_ = pDb > peakDb_ ? pDb : juce::jmax (pDb, peakDb_ - 0.35f);
@@ -228,11 +232,15 @@ void LevelMeter::push (float peak, float rms) noexcept
     {
         holdDb_ = juce::jmax (peakDb_, holdDb_ - 0.6f);
     }
-    repaint();
+
+    // Repaint only when something visible moved (meters at -inf cost nothing).
+    if (std::abs (before[0] - peakDb_) > 0.05f || std::abs (before[1] - rmsDb_) > 0.05f || std::abs (before[2] - holdDb_) > 0.05f)
+        repaint();
 }
 
 void LevelMeter::paint (juce::Graphics& g)
 {
+    g.fillAll (Colours::panel);
     auto b = getLocalBounds().toFloat();
     drawCaption (g, caption_, b.removeFromTop (14.0f), juce::Justification::centred);
 
