@@ -34,7 +34,7 @@ jobs:
             pluginval_bin: pluginval
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Linux dependencies
         if: runner.os == 'Linux'
@@ -57,11 +57,17 @@ jobs:
       - name: Unit tests (DSP + plugin layer)
         shell: bash
         run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            xvfb-run -a ctest --test-dir build -C Release --output-on-failure
-          else
-            ctest --test-dir build -C Release --output-on-failure
+          runner=""
+          if [ "$RUNNER_OS" == "Linux" ]; then runner="xvfb-run -a"; fi
+          status=0
+          $runner ctest --test-dir build -C Release --output-on-failure > ctest.log 2>&1 || status=$?
+          cat ctest.log
+          if [ $status -ne 0 ]; then
+            # Surface failures as annotations (visible on the run page and via the API).
+            grep -E "FAILED|\[ FAIL \]|\*\*\*|Not Run|Could not find|tests failed|failures\)" ctest.log | head -40 |
+              while IFS= read -r line; do echo "::error title=Test failure::${line//%/%25}"; done
           fi
+          exit $status
 
       - name: CPU benchmark
         shell: bash
